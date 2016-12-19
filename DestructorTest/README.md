@@ -82,3 +82,79 @@ destruct A with name:  "pa1"
  - 调用`pa2`的析构函数
  - 检查发现`pa2`存在子元素`pa1`
  - 自动的进行`pa1`的资源释放(`delete pa1 ???`)
+
+在上面的测试代码中，我们并没有手动删除对象`pa1`，如果不了解Qt的对象管理机制，手动通过`delete`关键字删除`pa1`会有什么结果呢？
+
+## Qt中的自动释放和手动释放
+测试代码3：
+```C++
+#include <qDebug>
+
+class A: public QObject {
+public:
+    A(QString _name) : name(_name) { qDebug() << "create A with name: " << this->name;}
+    ~A() { qDebug() << "destruct A with name: " << this->name;}
+private:
+    QString name;
+};
+
+int main()
+{
+    A *pa1 = new A("pa1");
+    A *pa2 = new A("pa2");
+
+    pa1->setParent(pa2);
+    delete pa2;
+    delete pa1;
+}
+```
+
+因为在上一章节我们知道系统在析构`pa2`的时候已经通过**Qt的父子关系**自动析构了子元素`pa1`，那么重复的析构`pa1`指向的空间肯定是会出现segmeng fault。
+运行的结果是：DestructorTest.exe exited with code -1073741819。
+
+如果我们调换手动释放`pa1`和`pa2`的顺序呢？即先释放子元素`pa1`再释放`pa2`，程序会正常运行吗？
+
+测试代码4：
+```C++
+#include <qDebug>
+
+class A: public QObject {
+public:
+    A(QString _name) {
+        this->setObjectName(_name);
+        qDebug() << "create A with obj name: " << this->objectName();
+    }
+    ~A() { qDebug() << "destruct A with obj name: " << this->objectName();}
+};
+
+int main()
+{
+    A *pa1 = new A("pa1");
+    A *pa2 = new A("pa2");
+
+    pa1->setParent(pa2);
+    pa2->dumpObjectTree();
+
+    delete pa1;
+    pa2->dumpObjectTree();
+
+    delete pa2;
+}
+```
+
+在这个测试代码中，我们添加了一些调试代码，使用到了`objectName()`和`dumpObjectTree()`。我们先看一下程序的运行结果：
+```
+create A with obj name:  "pa1"
+create A with obj name:  "pa2"
+QObject::pa2
+    QObject::pa1
+destruct A with obj name:  "pa1"
+QObject::pa2
+destruct A with obj name:  "pa2"
+```
+程序可以正常运行，在释放`pa2`的时候并没有重复释放`pa1`。
+
+这个时候，我们添加的调试代码`dumpObjectTree()`就发挥了作用，原来：
+ - 在调用`pa1->setParent(pa2);`之后，`pa2`就多了一个子元素`pa1`
+ - 手动释放`pa1`后，我们可以看到，`pa2`的子元素列表为空
+ - 手动删除`pa2`时，因为子元素列表为空，所以不进行任何操作
